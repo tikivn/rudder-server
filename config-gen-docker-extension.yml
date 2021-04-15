@@ -1,0 +1,23 @@
+
+x-shared-volume:
+  &shared-volume
+  type: bind
+  source: ./workspaceConfig.json
+  target: /etc/rudderstack/workspaceConfig.json
+
+services:
+  backend:
+    environment:
+      - RSERVER_BACKEND_CONFIG_CONFIG_FROM_FILE=true
+      - RSERVER_BACKEND_CONFIG_CONFIG_JSONPATH=/etc/rudderstack/workspaceConfig.json
+    volumes: 
+      - *shared-volume
+  
+  config-gen:
+    image: rudderlabs/rudder-config-generator:latest
+    ports:
+      - "9000:9000"
+    environment:
+      - REACT_APP_SAVE_TO_FILE_PATH=/etc/rudderstack/workspaceConfig.json
+    volumes: 
+      - *shared-volume
