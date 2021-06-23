@@ -1590,22 +1590,18 @@ func (rt *HandleT) batchGeneratorLoop() {
 	generatorStat := stats.NewTaggedStat("router_generator_loop", stats.TimerType, stats.Tags{"destType": rt.destName})
 	countStat := stats.NewTaggedStat("router_generator_events", stats.CountType, stats.Tags{"destType": rt.destName})
 
-	//List of jobs wich can be processed mapped per channel
-	type workerJobT struct {
-		worker *workerT
-		job    *jobsdb.JobT
-	}
-	var toProcess []workerJobT
-
 	for { //external loop: runs every hour
-		<-externalLoopScheduleTimer.C
+		readStart := <-externalLoopScheduleTimer.C
 		//updating this timer after the end of internal For Loop:
 		//Example:	externalLoopScheduleTime=1hour, internal loop took 65 minutes. By updating it after internalloop, we'll again run this loop after another 55 minutes
 		// 			which may help stay under API limits.
-		readStart := time.Now()
-		rt.logger.Info("starting list job reading")
 		generatorStat.Start()
-		rt.logger.Info(readStart.Clock())
+		//List of jobs wich can be processed mapped per channel
+		type workerJobT struct {
+			worker *workerT
+			job    *jobsdb.JobT
+		}
+		var toProcess []workerJobT
 
 		//start internal loop
 		for {
@@ -1621,7 +1617,7 @@ func (rt *HandleT) batchGeneratorLoop() {
 			combinedList := append(waitList, append(unprocessedList, append(throttledList, retryList...)...)...)
 
 			if len(combinedList) == 0 {
-				rt.logger.Infof("RT: DB Read Complete. No RT Jobs to process for destination: %s", rt.destName)
+				rt.logger.Debugf("RT: DB Read Complete. No RT Jobs to process for destination: %s", rt.destName)
 				time.Sleep(readSleep)
 				break
 			}
