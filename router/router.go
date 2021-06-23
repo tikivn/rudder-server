@@ -1563,21 +1563,6 @@ func (rt *HandleT) generatorLoop() {
 				continue
 			}
 
-			for {
-				allWorkersFree := true
-				for _, wrkr := range rt.workers {
-					if len(wrkr.channel) > 0 {
-						allWorkersFree = false
-						break
-					}
-				}
-				if allWorkersFree {
-					break
-				} else {
-					time.Sleep(10 * time.Second)
-				}
-			}
-
 			countStat.Count(len(combinedList))
 			generatorStat.End()
 			time.Sleep(fixedLoopSleep) // adding sleep here to reduce cpu load on postgres when we have less rps
@@ -1604,6 +1589,13 @@ func (rt *HandleT) batchGeneratorLoop() {
 
 	generatorStat := stats.NewTaggedStat("router_generator_loop", stats.TimerType, stats.Tags{"destType": rt.destName})
 	countStat := stats.NewTaggedStat("router_generator_events", stats.CountType, stats.Tags{"destType": rt.destName})
+
+	//List of jobs wich can be processed mapped per channel
+	type workerJobT struct {
+		worker *workerT
+		job    *jobsdb.JobT
+	}
+	var toProcess []workerJobT
 
 	for { //external loop: runs every hour
 		<-externalLoopScheduleTimer.C
@@ -1645,19 +1637,10 @@ func (rt *HandleT) batchGeneratorLoop() {
 				rt.logger.Debugf("[%v Router] ===== len to be processed==== : %v", rt.destName, len(combinedList))
 			}
 
-			//List of jobs wich can be processed mapped per channel
-			type workerJobT struct {
-				worker *workerT
-				job    *jobsdb.JobT
-			}
-
 			var statusList []*jobsdb.JobStatusT
 			var drainList []*jobsdb.JobStatusT
 			drainCountByDest := make(map[string]int)
 
-			var toProcess []workerJobT
-
-			throttledAtTime := time.Now()
 			//Identify jobs which can be processed
 			for _, job := range combinedList {
 				destID := destinationID(job)
@@ -1717,19 +1700,34 @@ func (rt *HandleT) batchGeneratorLoop() {
 			}
 
 			//Send the jobs to the jobQ
-			for _, wrkJob := range toProcess {
-				wrkJob.worker.channel <- workerMessageT{job: wrkJob.job, throttledAtTime: throttledAtTime}
-			}
-
-			if len(toProcess) == 0 {
-				rt.logger.Debugf("RT: No workers found for the jobs. Sleeping. Destination: %s", rt.destName)
-				time.Sleep(readSleep)
-				break
-			}
 
 			countStat.Count(len(combinedList))
 			generatorStat.End()
 			time.Sleep(fixedLoopSleep) // adding sleep here to reduce cpu load on postgres when we have less rps
+		}
+		throttledAtTime := time.Now()
+		for _, wrkJob := range toProcess {
+			wrkJob.worker.channel <- workerMessageT{job: wrkJob.job, throttledAtTime: throttledAtTime}
+		}
+
+		if len(toProcess) == 0 {
+			rt.logger.Debugf("RT: No workers found for the jobs. Sleeping. Destination: %s", rt.destName)
+			time.Sleep(readSleep)
+			// break	//removed this break so we reach the timerReset below(mandatory for this loop to continue)
+		}
+		for {
+			allWorkersFree := true
+			for _, wrkr := range rt.workers {
+				if len(wrkr.channel) > 0 {
+					allWorkersFree = false
+					break
+				}
+			}
+			if allWorkersFree {
+				break
+			} else {
+				time.Sleep(10 * time.Second)
+			}
 		}
 		externalLoopScheduleTimer.Reset(getNextTickDuration())
 	}
