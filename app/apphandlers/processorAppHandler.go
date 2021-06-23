@@ -79,10 +79,10 @@ func (processor *ProcessorApp) StartRudderCore(options *app.Options) {
 		if migrationMode == db.IMPORT || migrationMode == db.EXPORT || migrationMode == db.IMPORT_EXPORT {
 			startProcessorFunc := func() {
 				clearDB := false
-				StartProcessor(&clearDB, enableProcessor, &gatewayDB, &routerDB, &batchRouterDB, &procErrorDB, reportingI)
+				StartProcessor(&clearDB, enableProcessor, &gatewayDB, &routerDB, nil, &batchRouterDB, &procErrorDB, reportingI)
 			}
 			startRouterFunc := func() {
-				StartRouter(enableRouter, &routerDB, &batchRouterDB, &procErrorDB, reportingI)
+				StartRouter(enableRouter, &routerDB, nil, &batchRouterDB, &procErrorDB, reportingI)
 			}
 			enableRouter = false
 			enableProcessor = false
@@ -97,8 +97,9 @@ func (processor *ProcessorApp) StartRudderCore(options *app.Options) {
 		operationmanager.OperationManager.StartProcessLoop()
 	})
 
-	StartProcessor(&options.ClearDB, enableProcessor, &gatewayDB, &routerDB, &batchRouterDB, &procErrorDB, reportingI)
-	StartRouter(enableRouter, &routerDB, &batchRouterDB, &procErrorDB, reportingI)
+	//TODO fix list router
+	StartProcessor(&options.ClearDB, enableProcessor, &gatewayDB, &routerDB, nil, &batchRouterDB, &procErrorDB, reportingI)
+	StartRouter(enableRouter, &routerDB, nil, &batchRouterDB, &procErrorDB, reportingI)
 
 	if processor.App.Features().Replay != nil {
 		var replayDB jobsdb.HandleT

@@ -106,7 +106,7 @@ func rudderCoreBaseSetup() {
 }
 
 //StartProcessor atomically starts processor process if not already started
-func StartProcessor(clearDB *bool, enableProcessor bool, gatewayDB, routerDB, batchRouterDB *jobsdb.HandleT, procErrorDB *jobsdb.HandleT, reporting types.ReportingI) {
+func StartProcessor(clearDB *bool, enableProcessor bool, gatewayDB, routerDB, listRouterDB, batchRouterDB *jobsdb.HandleT, procErrorDB *jobsdb.HandleT, reporting types.ReportingI) {
 	moduleLoadLock.Lock()
 	defer moduleLoadLock.Unlock()
 
@@ -117,7 +117,7 @@ func StartProcessor(clearDB *bool, enableProcessor bool, gatewayDB, routerDB, ba
 	if enableProcessor {
 		var processorInstance = processor.NewProcessor()
 		processor.ProcessorManagerSetup(processorInstance)
-		processorInstance.Setup(backendconfig.DefaultBackendConfig, gatewayDB, routerDB, batchRouterDB, procErrorDB, clearDB, reporting)
+		processorInstance.Setup(backendconfig.DefaultBackendConfig, gatewayDB, routerDB, listRouterDB, batchRouterDB, procErrorDB, clearDB, reporting)
 		processorInstance.Start()
 
 		processorLoaded = true
@@ -125,7 +125,7 @@ func StartProcessor(clearDB *bool, enableProcessor bool, gatewayDB, routerDB, ba
 }
 
 //StartRouter atomically starts router process if not already started
-func StartRouter(enableRouter bool, routerDB, batchRouterDB, procErrorDB *jobsdb.HandleT, reporting types.ReportingI) {
+func StartRouter(enableRouter bool, routerDB, listRouterDB, batchRouterDB, procErrorDB *jobsdb.HandleT, reporting types.ReportingI) {
 	moduleLoadLock.Lock()
 	defer moduleLoadLock.Unlock()
 
@@ -136,13 +136,13 @@ func StartRouter(enableRouter bool, routerDB, batchRouterDB, procErrorDB *jobsdb
 	if enableRouter {
 		router.RoutersManagerSetup()
 		batchrouter.BatchRoutersManagerSetup()
-		go monitorDestRouters(routerDB, batchRouterDB, procErrorDB, reporting)
+		go monitorDestRouters(routerDB, listRouterDB, batchRouterDB, procErrorDB, reporting)
 		routerLoaded = true
 	}
 }
 
 // Gets the config from config backend and extracts enabled writekeys
-func monitorDestRouters(routerDB, batchRouterDB, procErrorDB *jobsdb.HandleT, reporting types.ReportingI) {
+func monitorDestRouters(routerDB, listRouterDB, batchRouterDB, procErrorDB *jobsdb.HandleT, reporting types.ReportingI) {
 	ch := make(chan utils.DataEvent)
 	backendconfig.Subscribe(ch, backendconfig.TopicBackendConfig)
 	dstToRouter := make(map[string]*router.HandleT)
@@ -170,7 +170,12 @@ func monitorDestRouters(routerDB, batchRouterDB, procErrorDB *jobsdb.HandleT, re
 					if !ok {
 						pkgLogger.Info("Starting a new Destination ", destination.DestinationDefinition.Name)
 						var router router.HandleT
-						router.Setup(routerDB, procErrorDB, destination.DestinationDefinition, reporting)
+						//TODO correct this
+						db := routerDB
+						if destination.DestinationDefinition.Name == "WEBHOOK" {
+							db = listRouterDB
+						}
+						router.Setup(db, procErrorDB, destination.DestinationDefinition, reporting)
 						dstToRouter[destination.DestinationDefinition.Name] = &router
 					}
 				}

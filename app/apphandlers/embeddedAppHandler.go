@@ -47,6 +47,7 @@ func (embedded *EmbeddedApp) StartRudderCore(options *app.Options) {
 
 	var gatewayDB jobsdb.HandleT
 	var routerDB jobsdb.HandleT
+	var listRouterDB jobsdb.HandleT
 	var batchRouterDB jobsdb.HandleT
 	var procErrorDB jobsdb.HandleT
 
@@ -63,6 +64,7 @@ func (embedded *EmbeddedApp) StartRudderCore(options *app.Options) {
 	if enableProcessor || enableReplay {
 		//setting up router, batch router, proc error DBs only if processor is enabled.
 		routerDB.Setup(jobsdb.ReadWrite, options.ClearDB, "rt", routerDBRetention, migrationMode, true, router.QueryFilters)
+		listRouterDB.Setup(jobsdb.ReadWrite, options.ClearDB, "list_rt", routerDBRetention, migrationMode, true, router.QueryFilters)
 		batchRouterDB.Setup(jobsdb.ReadWrite, options.ClearDB, "batch_rt", routerDBRetention, migrationMode, true, batchrouter.QueryFilters)
 		procErrorDB.Setup(jobsdb.ReadWrite, options.ClearDB, "proc_error", routerDBRetention, migrationMode, false, jobsdb.QueryFiltersT{})
 	}
@@ -77,15 +79,16 @@ func (embedded *EmbeddedApp) StartRudderCore(options *app.Options) {
 		if migrationMode == db.IMPORT || migrationMode == db.EXPORT || migrationMode == db.IMPORT_EXPORT {
 			startProcessorFunc := func() {
 				clearDB := false
-				StartProcessor(&clearDB, enableProcessor, &gatewayDB, &routerDB, &batchRouterDB, &procErrorDB, reportingI)
+				StartProcessor(&clearDB, enableProcessor, &gatewayDB, &routerDB, &listRouterDB, &batchRouterDB, &procErrorDB, reportingI)
 			}
 			startRouterFunc := func() {
-				StartRouter(enableRouter, &routerDB, &batchRouterDB, &procErrorDB, reportingI)
+				StartRouter(enableRouter, &routerDB, &listRouterDB, &batchRouterDB, &procErrorDB, reportingI)
 			}
 			enableRouter = false
 			enableProcessor = false
 			enableGateway = (migrationMode != db.EXPORT)
 
+			//TODO: pass list router for migrator, operationsmanager
 			embedded.App.Features().Migrator.PrepareJobsdbsForImport(&gatewayDB, &routerDB, &batchRouterDB)
 			embedded.App.Features().Migrator.Setup(&gatewayDB, &routerDB, &batchRouterDB, startProcessorFunc, startRouterFunc)
 		}
@@ -96,8 +99,8 @@ func (embedded *EmbeddedApp) StartRudderCore(options *app.Options) {
 		operationmanager.OperationManager.StartProcessLoop()
 	})
 
-	StartProcessor(&options.ClearDB, enableProcessor, &gatewayDB, &routerDB, &batchRouterDB, &procErrorDB, reportingI)
-	StartRouter(enableRouter, &routerDB, &batchRouterDB, &procErrorDB, reportingI)
+	StartProcessor(&options.ClearDB, enableProcessor, &gatewayDB, &routerDB, &listRouterDB, &batchRouterDB, &procErrorDB, reportingI)
+	StartRouter(enableRouter, &routerDB, &listRouterDB, &batchRouterDB, &procErrorDB, reportingI)
 
 	if embedded.App.Features().Replay != nil {
 		var replayDB jobsdb.HandleT

@@ -57,6 +57,7 @@ type HandleT struct {
 	stats                          stats.Stats
 	gatewayDB                      jobsdb.JobsDB
 	routerDB                       jobsdb.JobsDB
+	listRouterDB                   jobsdb.JobsDB
 	batchRouterDB                  jobsdb.JobsDB
 	errorDB                        jobsdb.JobsDB
 	transformer                    transformer.Transformer
@@ -260,7 +261,7 @@ func (proc *HandleT) Status() interface{} {
 }
 
 //Setup initializes the module
-func (proc *HandleT) Setup(backendConfig backendconfig.BackendConfig, gatewayDB jobsdb.JobsDB, routerDB jobsdb.JobsDB, batchRouterDB jobsdb.JobsDB, errorDB jobsdb.JobsDB, clearDB *bool, reporting types.ReportingI) {
+func (proc *HandleT) Setup(backendConfig backendconfig.BackendConfig, gatewayDB, routerDB, listRouterDB, batchRouterDB jobsdb.JobsDB, errorDB jobsdb.JobsDB, clearDB *bool, reporting types.ReportingI) {
 	proc.pauseChannel = make(chan *PauseT)
 	proc.resumeChannel = make(chan bool)
 	proc.reporting = reporting
@@ -271,6 +272,7 @@ func (proc *HandleT) Setup(backendConfig backendconfig.BackendConfig, gatewayDB 
 
 	proc.gatewayDB = gatewayDB
 	proc.routerDB = routerDB
+	proc.listRouterDB = listRouterDB
 	proc.batchRouterDB = batchRouterDB
 	proc.errorDB = errorDB
 	proc.pStatsJobs = &misc.PerfStats{}
@@ -1131,6 +1133,7 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 	proc.statNumRequests.Count(len(jobList))
 
 	var destJobs []*jobsdb.JobT
+	var listDestJobs []*jobsdb.JobT
 	var batchDestJobs []*jobsdb.JobT
 	var statusList []*jobsdb.JobStatusT
 	var groupedEvents = make(map[string][]transformer.TransformerEventT)
@@ -1531,8 +1534,12 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 				CustomVal:    destType,
 				EventPayload: destEventJSON,
 			}
+
+			//TODO correct this
 			if misc.Contains(rawDataDestinations, newJob.CustomVal) {
 				batchDestJobs = append(batchDestJobs, &newJob)
+			} else if newJob.CustomVal == "WEBHOOK" {
+				listDestJobs = append(listDestJobs, &newJob)
 			} else {
 				destJobs = append(destJobs, &newJob)
 			}
@@ -1591,6 +1598,16 @@ func (proc *HandleT) processJobsForDest(jobList []*jobsdb.JobT, parsedEventList 
 			panic(err)
 		}
 		proc.statBatchDestNumOutputEvents.Count(len(batchDestJobs))
+	}
+	if len(listDestJobs) > 0 {
+		proc.logger.Debug("[Processor] Total jobs written to list router : ", len(listDestJobs))
+		err := proc.listRouterDB.Store(listDestJobs)
+		if err != nil {
+			proc.logger.Errorf("Store into list router table failed with error: %v", err)
+			proc.logger.Errorf("listDestJobs: %v", listDestJobs)
+			panic(err)
+		}
+		//TODO add a metric
 	}
 
 	var procErrorJobs []*jobsdb.JobT
