@@ -103,6 +103,7 @@ type HandleT struct {
 	drainJobHandler                        drain.DrainI
 	reporting                              utilTypes.ReportingI
 	reportingEnabled                       bool
+	routerCron                             *routerCronT
 }
 
 type jobResponseT struct {
@@ -159,6 +160,13 @@ type destJobCountsT struct {
 	byUser map[string]int
 }
 
+type routerCronT struct {
+	//externalLoopStepTime          time.Duration
+	externalLoopScheduleTime        time.Duration
+	externalLoopScheduleTimer       *time.Timer
+	externalLoopScheduleTimeChannel chan time.Time
+}
+
 var (
 	jobQueryBatchSize, updateStatusBatchSize, noOfJobsPerChannel  int
 	failedEventsCacheSize                                         int
@@ -171,9 +179,6 @@ var (
 	toAbortDestinationIDs                                         string
 	QueryFilters                                                  jobsdb.QueryFiltersT
 	disableEgress                                                 bool
-	//externalLoopStepTime                                          time.Duration
-	externalLoopScheduleTime  time.Duration
-	externalLoopScheduleTimer *time.Timer
 )
 
 type requestMetric struct {
@@ -213,9 +218,6 @@ func loadConfig() {
 	minSleep = config.GetDuration("Router.minSleepInS", time.Duration(0)) * time.Second
 	config.RegisterDurationConfigVariable(time.Duration(5), &maxStatusUpdateWait, true, time.Second, "Router.maxStatusUpdateWaitInS")
 	disableEgress = config.GetBool("disableEgress", false)
-	//externalLoopStepTime = config.GetDuration("CustomAudience.externalLoopStepTime", time.Duration(2)) * time.Second	//was using this to check if externalloop readingtime has come. if not then sleep-contnue-repeat.
-	externalLoopScheduleTime = config.GetDuration("CustomAudience.externalLoopScheduleTime", time.Duration(1)) * time.Second //begin readjobs every hour
-	externalLoopScheduleTimer = time.NewTimer(getNextTickDuration())                                                         //externalLoopStepTime not needed now because this timer runs externalLoop every hour(or whateverduration)
 
 	// Time period for diagnosis ticker
 	diagnosisTickerTime = config.GetDuration("Diagnostics.routerTimePeriodInS", 60) * time.Second
@@ -1570,17 +1572,25 @@ func (rt *HandleT) generatorLoop() {
 	}
 }
 
-func getNextTickDuration() time.Duration {
+func (rt *HandleT) getNextTickDuration() time.Duration {
 	now := time.Now()
 	nextTick := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.Local) //now.Hour(), 0, 0, 0 should be configurable too
 	for {
 		if nextTick.Before(now) {
-			nextTick = nextTick.Add(externalLoopScheduleTime)
+			nextTick = nextTick.Add(rt.routerCron.externalLoopScheduleTime)
 		} else {
 			break
 		}
 	}
 	return time.Until(nextTick)
+}
+
+func (rt *HandleT) externalLoopScheduler() {
+	rt.logger.Info("externalscheuler started")
+	for {
+		rt.routerCron.externalLoopScheduleTimeChannel <- (<-rt.routerCron.externalLoopScheduleTimer.C)
+		rt.routerCron.externalLoopScheduleTimer.Reset(rt.getNextTickDuration())
+	}
 }
 
 func (rt *HandleT) batchGeneratorLoop() {
@@ -1591,23 +1601,20 @@ func (rt *HandleT) batchGeneratorLoop() {
 	countStat := stats.NewTaggedStat("router_generator_events", stats.CountType, stats.Tags{"destType": rt.destName})
 
 	for { //external loop: runs every hour
-		<-externalLoopScheduleTimer.C
-		//updating this timer after the end of internal For Loop:
-		//Example:	externalLoopScheduleTime=1hour, internal loop took 65 minutes. By updating it after internalloop, we'll again run this loop after another 55 minutes
-		// 			which may help stay under API limits.
+		externalLoopStart := <-rt.routerCron.externalLoopScheduleTimeChannel
+		rt.logger.Info("externalloopstarted")
 		generatorStat.Start()
 
 		//start internal loop
 		for {
-			innerReadStart := time.Now()
 			toQuery := jobQueryBatchSize
-			retryList := rt.jobsDB.GetToRetry(jobsdb.GetQueryParamsT{CustomValFilters: []string{rt.destName}, Count: toQuery, UseTimeFilter: true, Before: innerReadStart})
+			retryList := rt.jobsDB.GetToRetry(jobsdb.GetQueryParamsT{CustomValFilters: []string{rt.destName}, Count: toQuery, UseTimeFilter: true, Before: externalLoopStart})
 			toQuery -= len(retryList)
-			throttledList := rt.jobsDB.GetThrottled(jobsdb.GetQueryParamsT{CustomValFilters: []string{rt.destName}, Count: toQuery, UseTimeFilter: true, Before: innerReadStart})
+			throttledList := rt.jobsDB.GetThrottled(jobsdb.GetQueryParamsT{CustomValFilters: []string{rt.destName}, Count: toQuery, UseTimeFilter: true, Before: externalLoopStart})
 			toQuery -= len(throttledList)
-			waitList := rt.jobsDB.GetWaiting(jobsdb.GetQueryParamsT{CustomValFilters: []string{rt.destName}, Count: toQuery, UseTimeFilter: true, Before: innerReadStart}) //Jobs send to waiting state
+			waitList := rt.jobsDB.GetWaiting(jobsdb.GetQueryParamsT{CustomValFilters: []string{rt.destName}, Count: toQuery, UseTimeFilter: true, Before: externalLoopStart}) //Jobs send to waiting state
 			toQuery -= len(waitList)
-			unprocessedList := rt.jobsDB.GetUnprocessed(jobsdb.GetQueryParamsT{CustomValFilters: []string{rt.destName}, Count: toQuery, UseTimeFilter: true, Before: innerReadStart})
+			unprocessedList := rt.jobsDB.GetUnprocessed(jobsdb.GetQueryParamsT{CustomValFilters: []string{rt.destName}, Count: toQuery, UseTimeFilter: true, Before: externalLoopStart})
 
 			combinedList := append(waitList, append(unprocessedList, append(throttledList, retryList...)...)...)
 
@@ -1728,8 +1735,6 @@ func (rt *HandleT) batchGeneratorLoop() {
 			generatorStat.End()
 			time.Sleep(fixedLoopSleep) // adding sleep here to reduce cpu load on postgres when we have less rps
 		}
-
-		externalLoopScheduleTimer.Reset(getNextTickDuration())
 	}
 }
 
@@ -1853,6 +1858,14 @@ func (rt *HandleT) Setup(jobsDB *jobsdb.HandleT, errorDB jobsdb.JobsDB, destinat
 		<-rt.backendConfigInitialized
 		//TODO correct the checks
 		if rt.destName == "WEBHOOK" {
+			rt.routerCron = &routerCronT{
+				externalLoopScheduleTime:        config.GetDuration("CustomAudience.externalLoopScheduleTime", time.Duration(1)) * time.Second, //begin readjobs every hour,
+				externalLoopScheduleTimeChannel: make(chan time.Time, 200),                                                                     //configurable 200
+			}
+			rt.routerCron.externalLoopScheduleTimer = time.NewTimer(rt.getNextTickDuration()) //externalLoopStepTime not needed now because this timer runs externalLoop every hour(or whateverduration)
+			rruntime.Go(func() {
+				rt.externalLoopScheduler()
+			})
 			rt.batchGeneratorLoop()
 		} else {
 			rt.generatorLoop()
