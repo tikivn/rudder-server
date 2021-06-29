@@ -1101,8 +1101,21 @@ func (rt *HandleT) findWorker(job *jobsdb.JobT, throttledAtTime time.Time) (toSe
 	//#EndJobOrder
 }
 
-func (rt *HandleT) findWorkerByDestID(destID string) *workerT {
-	index := int(math.Abs(float64(misc.GetHash(destID) % rt.noOfWorkers)))
+func (rt *HandleT) findWorkerByDestID(job *jobsdb.JobT, throttledAtTime time.Time) *workerT {
+	//checking if the user is in throttledMap. If yes, returning nil.
+	//this check is done to maintain order.
+	if _, ok := rt.throttledUserMap[job.UserID]; ok {
+		rt.logger.Debugf(`[%v Router] :: Skipping processing of job:%d of user:%s as user has earlier jobs in throttled map`, rt.destName, job.JobID, job.UserID)
+		return nil
+	}
+	var parameters JobParametersT
+	err := json.Unmarshal(job.Parameters, &parameters)
+	if err == nil && rt.canThrottle(parameters.DestinationID, job.UserID, throttledAtTime) {
+		rt.throttledUserMap[job.UserID] = struct{}{}
+		rt.logger.Debugf(`[%v Router] :: Skipping processing of job:%d of user:%s as throttled limits exceeded`, rt.destName, job.JobID, job.UserID)
+		return nil
+	}
+	index := int(math.Abs(float64(misc.GetHash(parameters.DestinationID) % rt.noOfWorkers)))
 	return rt.workers[index]
 }
 
@@ -1646,6 +1659,7 @@ func (rt *HandleT) batchGeneratorLoop() {
 
 			var toProcess []workerJobT
 
+			rt.throttledUserMap = make(map[string]struct{})
 			throttledAtTime := time.Now()
 
 			//Identify jobs which can be processed
@@ -1668,7 +1682,7 @@ func (rt *HandleT) batchGeneratorLoop() {
 					drainCountByDest[destID] = drainCountByDest[destID] + 1
 					continue
 				}
-				w := rt.findWorkerByDestID(destID)
+				w := rt.findWorkerByDestID(job, throttledAtTime)
 				if w != nil {
 					status := jobsdb.JobStatusT{
 						JobID:         job.JobID,
@@ -1683,6 +1697,7 @@ func (rt *HandleT) batchGeneratorLoop() {
 					toProcess = append(toProcess, workerJobT{worker: w, job: job})
 				}
 			}
+			rt.throttledUserMap = nil
 
 			//Mark the jobs as executing
 			err := rt.jobsDB.UpdateJobStatus(statusList, []string{rt.destName}, nil)
