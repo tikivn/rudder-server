@@ -78,16 +78,20 @@ func (c *context) Finish() {
 }
 
 const (
-	WriteKeyEnabled       = "enabled-write-key"
-	WriteKeyEnabledNoUT   = "enabled-write-key-no-ut"
-	WriteKeyEnabledOnlyUT = "enabled-write-key-only-ut"
-	WorkspaceID           = "some-workspace-id"
-	SourceIDEnabled       = "enabled-source"
-	SourceIDDisabled      = "disabled-source"
-	DestinationIDEnabledA = "enabled-destination-a" // test destination router
-	DestinationIDEnabledB = "enabled-destination-b" // test destination batch router
-	DestinationIDEnabledC = "enabled-destination-c"
-	DestinationIDDisabled = "disabled-destination"
+	WriteKeyEnabled         = "enabled-write-key"
+	WriteKeyEnabledNoUT     = "enabled-write-key-no-ut"
+	WriteKeyEnabledOnlyUT   = "enabled-write-key-only-ut"
+	WorkspaceID             = "some-workspace-id"
+	SourceIDEnabled         = "enabled-source"
+	SourceIDDisabled        = "disabled-source"
+	DestinationIDEnabledA   = "enabled-destination-a" // test destination router
+	DestinationIDEnabledB   = "enabled-destination-b" // test destination batch router
+	DestinationIDEnabledC   = "enabled-destination-c"
+	DestinationIDDisabled   = "disabled-destination"
+	ReportingSourceID       = "reporting-source-id"
+	ReportingWriteKey       = "reporting-write-key"
+	ReportingDestinationID1 = "reporting-destination-id-1"
+	ReportingDestinationID2 = "reporting-destination-id-2"
 )
 
 var (
@@ -223,6 +227,37 @@ var sampleBackendConfig = backendconfig.ConfigT{
 						{
 							VersionID: "transformation-version-id",
 						},
+					},
+				},
+			},
+		},
+		{
+			ID:       ReportingSourceID,
+			WriteKey: ReportingWriteKey,
+			Enabled:  true,
+			Destinations: []backendconfig.DestinationT{
+				{
+					ID:                 ReportingDestinationID1,
+					Name:               "reporting-1",
+					Enabled:            true,
+					IsProcessorEnabled: true,
+					DestinationDefinition: backendconfig.DestinationDefinitionT{
+						ID:          "enabled-destination-1-definition-id",
+						Name:        "WEBHOOK",
+						DisplayName: "enabled-destination-1-definition-display-name",
+						Config:      map[string]interface{}{},
+					},
+				},
+				{
+					ID:                 ReportingDestinationID2,
+					Name:               "reporting-2",
+					Enabled:            true,
+					IsProcessorEnabled: true,
+					DestinationDefinition: backendconfig.DestinationDefinitionT{
+						ID:          "enabled-destination-2-definition-id",
+						Name:        "WEBHOOK",
+						DisplayName: "enabled-destination-2-definition-display-name",
+						Config:      map[string]interface{}{},
 					},
 				},
 			},
@@ -1113,6 +1148,143 @@ var _ = Describe("Processor", func() {
 			go processor.mainLoop()
 			time.Sleep(3 * time.Second)
 			Expect(isUnLocked).To(BeFalse())
+		})
+	})
+
+	Context("Reporting Tests", func() {
+		var clearDB = false
+		BeforeEach(func() {
+			// crash recovery check
+			c.mockGatewayJobsDB.EXPECT().DeleteExecuting(jobsdb.GetQueryParamsT{CustomValFilters: gatewayCustomVal, Count: -1}).Times(1)
+		})
+		It("Should Report Proper Metrics on Executing processJobsForDest", func() {
+			mockTransformer := mocksTransformer.NewMockTransformer(c.mockCtrl)
+			mockTransformer.EXPECT().Setup().Times(1)
+
+			var messages map[string]mockEventData = map[string]mockEventData{
+				// this message should be delivered only to destination A
+				"message-1": {
+					id:                        "1",
+					jobid:                     1010,
+					originalTimestamp:         "2000-01-02T01:23:45",
+					expectedOriginalTimestamp: "2000-01-02T01:23:45.000Z",
+					sentAt:                    "2000-01-02 01:23",
+					expectedSentAt:            "2000-01-02T01:23:00.000Z",
+					expectedReceivedAt:        "2001-01-02T02:23:45.000Z",
+					integrations:              map[string]bool{"All": true},
+				},
+				// this message should not be delivered to destination A
+				"message-2": {
+					id:                        "2",
+					jobid:                     1010,
+					originalTimestamp:         "2000-02-02T01:23:45",
+					expectedOriginalTimestamp: "2000-02-02T01:23:45.000Z",
+					expectedReceivedAt:        "2001-01-02T02:23:45.000Z",
+					integrations:              map[string]bool{"All": true},
+				},
+				// this message should be delivered to all destinations
+				"message-3": {
+					id:                 "3",
+					jobid:              2010,
+					originalTimestamp:  "malformed timestamp",
+					sentAt:             "2000-03-02T01:23:15",
+					expectedSentAt:     "2000-03-02T01:23:15.000Z",
+					expectedReceivedAt: "2002-01-02T02:23:45.000Z",
+					integrations:       map[string]bool{"All": true},
+				},
+				// this message should be delivered to all destinations (default All value)
+				"message-4": {
+					id:                        "4",
+					jobid:                     2010,
+					originalTimestamp:         "2000-04-02T02:23:15.000Z", // missing sentAt
+					expectedOriginalTimestamp: "2000-04-02T02:23:15.000Z",
+					expectedReceivedAt:        "2002-01-02T02:23:45.000Z",
+					integrations:              map[string]bool{"All": true},
+				},
+				// this message should not be delivered to any destination
+				"message-5": {
+					id:                 "5",
+					jobid:              2010,
+					expectedReceivedAt: "2002-01-02T02:23:45.000Z",
+					integrations:       map[string]bool{"All": true},
+				},
+			}
+
+			var unprocessedJobsList []*jobsdb.JobT = []*jobsdb.JobT{
+				{
+					UUID:          uuid.NewV4(),
+					JobID:         1010,
+					CreatedAt:     time.Date(2020, 04, 28, 23, 26, 00, 00, time.UTC),
+					ExpireAt:      time.Date(2020, 04, 28, 23, 26, 00, 00, time.UTC),
+					CustomVal:     gatewayCustomVal[0],
+					EventPayload:  createBatchPayload(WriteKeyEnabledNoUT, "2001-01-02T02:23:45.000Z", []mockEventData{messages["message-1"], messages["message-2"]}),
+					LastJobStatus: jobsdb.JobStatusT{},
+					Parameters:    nil,
+				},
+				{
+					UUID:          uuid.NewV4(),
+					JobID:         1002,
+					CreatedAt:     time.Date(2020, 04, 28, 23, 27, 00, 00, time.UTC),
+					ExpireAt:      time.Date(2020, 04, 28, 23, 27, 00, 00, time.UTC),
+					CustomVal:     gatewayCustomVal[0],
+					EventPayload:  nil,
+					LastJobStatus: jobsdb.JobStatusT{},
+					Parameters:    nil,
+				},
+			}
+
+			var toRetryJobsList []*jobsdb.JobT = []*jobsdb.JobT{
+				{
+					UUID:         uuid.NewV4(),
+					JobID:        2010,
+					CreatedAt:    time.Date(2020, 04, 28, 13, 26, 00, 00, time.UTC),
+					ExpireAt:     time.Date(2020, 04, 28, 13, 26, 00, 00, time.UTC),
+					CustomVal:    gatewayCustomVal[0],
+					EventPayload: createBatchPayload(WriteKeyEnabledNoUT, "2002-01-02T02:23:45.000Z", []mockEventData{messages["message-3"], messages["message-4"], messages["message-5"]}),
+					LastJobStatus: jobsdb.JobStatusT{
+						AttemptNum: 1,
+					},
+					Parameters: nil,
+				},
+				{
+					UUID:          uuid.NewV4(),
+					JobID:         2002,
+					CreatedAt:     time.Date(2020, 04, 28, 13, 27, 00, 00, time.UTC),
+					ExpireAt:      time.Date(2020, 04, 28, 13, 27, 00, 00, time.UTC),
+					CustomVal:     gatewayCustomVal[0],
+					EventPayload:  nil,
+					LastJobStatus: jobsdb.JobStatusT{},
+					Parameters:    nil,
+				},
+				{
+					UUID:          uuid.NewV4(),
+					JobID:         2003,
+					CreatedAt:     time.Date(2020, 04, 28, 13, 28, 00, 00, time.UTC),
+					ExpireAt:      time.Date(2020, 04, 28, 13, 28, 00, 00, time.UTC),
+					CustomVal:     gatewayCustomVal[0],
+					EventPayload:  nil,
+					LastJobStatus: jobsdb.JobStatusT{},
+					Parameters:    nil,
+				},
+			}
+
+			var processor *HandleT = &HandleT{
+				transformer: mockTransformer,
+			}
+
+			// crash recover returns empty list
+			c.mockGatewayJobsDB.EXPECT().DeleteExecuting(jobsdb.GetQueryParamsT{CustomValFilters: gatewayCustomVal, Count: -1}).Times(1)
+
+			callRetry := c.mockGatewayJobsDB.EXPECT().GetToRetry(jobsdb.GetQueryParamsT{CustomValFilters: gatewayCustomVal, Count: c.dbReadBatchSize}).Return(toRetryJobsList).Times(1)
+			callUnprocessed := c.mockGatewayJobsDB.EXPECT().GetUnprocessed(jobsdb.GetQueryParamsT{CustomValFilters: gatewayCustomVal, Count: c.dbReadBatchSize - len(toRetryJobsList)}).Return(unprocessedJobsList).Times(1).After(callRetry)
+			mockTransformer.EXPECT().Transform(gomock.Any(), gomock.Any(), gomock.Any()).Times(1).After(callUnprocessed).Return()
+			c.mockGatewayJobsDB.EXPECT().CommitTransaction(nil).Times(1)
+			c.mockGatewayJobsDB.EXPECT().ReleaseUpdateJobStatusLocks().Times(1)
+
+			c.mockBackendConfig.EXPECT().GetWorkspaceIDForWriteKey(WriteKeyEnabledNoUT).Return(WorkspaceID).AnyTimes()
+			c.mockBackendConfig.EXPECT().GetWorkspaceLibrariesForWorkspaceID(WorkspaceID).Return(backendconfig.LibrariesT{}).AnyTimes()
+			processor.Setup(c.mockBackendConfig, c.mockGatewayJobsDB, c.mockRouterJobsDB, c.mockBatchRouterJobsDB, c.mockProcErrorsDB, &clearDB, c.MockReportingI)
+			c.MockReportingI.EXPECT().WaitForSetup(gomock.Any()).Times(1)
 		})
 	})
 
