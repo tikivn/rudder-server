@@ -16,7 +16,7 @@ var (
 	AWSAccessKey        = "accessKey"
 	AWSAccessKeyID      = "accessKeyID"
 	AWSBucketNameConfig = "bucketName"
-	AWSRegion           = "region"
+	AWSGlueCatalogID    = "glueCatalogId"
 
 	// glue
 	glueSerdeName             = "ParquetHiveSerDe"
@@ -28,15 +28,17 @@ var (
 type GlueSchemaRepository struct {
 	glueClient *glue.Glue
 	s3bucket   string
-	Warehouse  warehouseutils.WarehouseT
-	Namespace  string
+	catalogID  string
+	warehouse  warehouseutils.WarehouseT
+	namespace  string
 }
 
 func NewGlueSchemaRepository(wh warehouseutils.WarehouseT) (*GlueSchemaRepository, error) {
 	gl := GlueSchemaRepository{
 		s3bucket:  warehouseutils.GetConfigValue(AWSBucketNameConfig, wh),
-		Warehouse: wh,
-		Namespace: wh.Namespace,
+		warehouse: wh,
+		namespace: wh.Namespace,
+		catalogID: warehouseutils.GetConfigValue(AWSGlueCatalogID, wh),
 	}
 
 	glueClient, err := getGlueClient(wh)
@@ -55,7 +57,10 @@ func (gl *GlueSchemaRepository) FetchSchema(warehouse warehouseutils.WarehouseT)
 	var getTablesOutput *glue.GetTablesOutput
 	var getTablesInput *glue.GetTablesInput
 	for true {
-		getTablesInput = &glue.GetTablesInput{DatabaseName: &warehouse.Namespace}
+		getTablesInput = &glue.GetTablesInput{
+			CatalogId:    &gl.catalogID,
+			DatabaseName: &warehouse.Namespace,
+		}
 
 		if getTablesOutput != nil && getTablesOutput.NextToken != nil {
 			// add nextToken to the request if there are multiple list segments
@@ -92,13 +97,14 @@ func (gl *GlueSchemaRepository) FetchSchema(warehouse warehouseutils.WarehouseT)
 
 func (gl *GlueSchemaRepository) CreateSchema() (err error) {
 	_, err = gl.glueClient.CreateDatabase(&glue.CreateDatabaseInput{
+		CatalogId: &gl.catalogID,
 		DatabaseInput: &glue.DatabaseInput{
-			Name: &gl.Namespace,
+			Name: &gl.namespace,
 		},
 	})
 	if err != nil {
 		if _, ok := err.(*glue.AlreadyExistsException); ok {
-			pkgLogger.Infof("Skipping database creation : database %s already eists", gl.Namespace)
+			pkgLogger.Infof("Skipping database creation : database %s already eists", gl.namespace)
 			err = nil
 		}
 	}
@@ -110,7 +116,8 @@ func (gl *GlueSchemaRepository) CreateTable(tableName string, columnMap map[stri
 	// td: add location too when load file name is finalized.
 	// create table request
 	input := glue.CreateTableInput{
-		DatabaseName: aws.String(gl.Namespace),
+		CatalogId:    &gl.catalogID,
+		DatabaseName: aws.String(gl.namespace),
 		TableInput: &glue.TableInput{
 			Name: aws.String(tableName),
 		},
@@ -131,14 +138,15 @@ func (gl *GlueSchemaRepository) CreateTable(tableName string, columnMap map[stri
 
 func (gl *GlueSchemaRepository) AddColumn(tableName string, columnName string, columnType string) (err error) {
 	updateTableInput := glue.UpdateTableInput{
-		DatabaseName: aws.String(gl.Namespace),
+		CatalogId:    &gl.catalogID,
+		DatabaseName: aws.String(gl.namespace),
 		TableInput: &glue.TableInput{
 			Name: aws.String(tableName),
 		},
 	}
 
 	// fetch schema from glue
-	schema, err := gl.FetchSchema(gl.Warehouse)
+	schema, err := gl.FetchSchema(gl.warehouse)
 	if err != nil {
 		return err
 	}
@@ -183,12 +191,6 @@ func getGlueClient(wh warehouseutils.WarehouseT) (*glue.Glue, error) {
 		config = config.WithCredentials(credentials.NewStaticCredentials(accessKeyID, accessKey, ""))
 	}
 
-	// read region from config
-	if misc.HasAWSRegionInConfig(wh.Destination.Config) {
-		region := warehouseutils.GetConfigValue(AWSRegion, wh)
-		config = config.WithRegion(region)
-	}
-
 	// td: need to read region and accountId or one of them??
 	svc := glue.New(sess, config)
 	return svc, nil
@@ -218,5 +220,5 @@ func (gl *GlueSchemaRepository) getStorageDescriptor(tableName string, columnMap
 }
 
 func (gl *GlueSchemaRepository) getS3LocationForTable(tableName string) string {
-	return fmt.Sprintf("s3://%s/%s", gl.s3bucket, warehouseutils.GetTablePathInObjectStorage(gl.Namespace, tableName))
+	return fmt.Sprintf("s3://%s/%s", gl.s3bucket, warehouseutils.GetTablePathInObjectStorage(gl.namespace, tableName))
 }

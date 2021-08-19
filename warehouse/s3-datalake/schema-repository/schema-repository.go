@@ -2,7 +2,6 @@ package schemarepository
 
 import (
 	"github.com/rudderlabs/rudder-server/utils/logger"
-	"github.com/rudderlabs/rudder-server/utils/misc"
 	warehouseutils "github.com/rudderlabs/rudder-server/warehouse/utils"
 )
 
@@ -40,8 +39,16 @@ type SchemaRepository interface {
 	AlterColumn(tableName string, columnName string, columnType string) (err error)
 }
 
+func hasGlueCatalogIdInConfig(config interface{}) bool {
+	configMap := config.(map[string]interface{})
+	if configMap["glueCatalogId"] == nil || configMap["glueCatalogId"].(string) == "" {
+		return false
+	}
+	return true
+}
+
 func NewSchemaRepository(wh warehouseutils.WarehouseT, uploader warehouseutils.UploaderI) (SchemaRepository, error) {
-	if misc.HasAWSRegionInConfig(wh.Destination.Config) {
+	if hasGlueCatalogIdInConfig(wh.Destination.Config) {
 		return NewGlueSchemaRepository(wh)
 	}
 	return NewLocalSchemaRepository(wh, uploader)
