@@ -3,6 +3,8 @@ package jobsdb
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rudderlabs/rudder-server/distributed"
@@ -10,10 +12,10 @@ import (
 )
 
 type CustomerQueue struct {
-	GatewayJobsdb      JobsDB
-	RouterJobsdb       JobsDB
-	BatchrouterJobsddb JobsDB
-	ProcerrorJobsdb    JobsDB
+	GatewayJobsdb      *HandleT
+	RouterJobsdb       *HandleT
+	BatchrouterJobsddb *HandleT
+	ProcerrorJobsdb    *HandleT
 }
 
 var customerQueues map[string]*CustomerQueue
@@ -66,7 +68,7 @@ func SetupCustomerQueues(clearAll bool) {
 	}
 }
 
-func getQueueForCustomer(customerWorkspaceID, queue string) JobsDB {
+func getQueueForCustomer(customerWorkspaceID, queue string) *HandleT {
 	customerQueue := customerQueues[customerWorkspaceID]
 	switch queue {
 	case "gw":
@@ -195,4 +197,125 @@ func GetJournalEntries(opType, customer, queue string) (entries []JournalEntryT)
 
 func GetImportingList(params GetQueryParamsT, customer, queue string) []*JobT {
 	return getQueueForCustomer(customer, queue).GetImportingList(params)
+}
+
+func GetUnionUnprocessed(params GetQueryParamsT, queueType string) []*JobT {
+	toQuery := params.Count
+	customValFilters := params.CustomValFilters
+	// parameterFilters := params.ParameterFilters
+	//create query here
+	configList := distributed.GetAllCustomersComputeConfig()
+	unionQueries := make([]string, 0)
+	for customer, config := range configList {
+		count := int(config.ComputeShare * float32(toQuery))
+		jd := getQueueForCustomer(customer, queueType)
+		jd.dsMigrationLock.RLock()
+		jd.dsListLock.RLock()
+		defer jd.dsMigrationLock.RUnlock()
+		defer jd.dsListLock.RUnlock()
+
+		ds := jd.getDSList(false)[0]
+		sqlStatement := fmt.Sprintf(`SELECT %[1]s.job_id, %[1]s.uuid, %[1]s.user_id, %[1]s.parameters, %[1]s.custom_val,
+                                               %[1]s.event_payload, %[1]s.created_at,
+                                               %[1]s.expire_at
+                                             FROM %[1]s LEFT JOIN %[2]s ON %[1]s.job_id=%[2]s.job_id
+                                             WHERE %[2]s.job_id is NULL`, ds.JobTable, ds.JobStatusTable)
+		if len(customValFilters) > 0 && !params.IgnoreCustomValFiltersInQuery {
+			sqlStatement += " AND " + constructQuery(jd, fmt.Sprintf("%s.custom_val", ds.JobTable),
+				customValFilters, "OR")
+		}
+		sqlStatement += fmt.Sprintf(" ORDER BY %s.job_id", ds.JobTable)
+		sqlStatement += fmt.Sprintf(" LIMIT %d", count)
+		unionQueries = append(unionQueries, sqlStatement)
+	}
+
+	unionQuery := strings.Join(unionQueries, ") UNION (")
+	finalQuery := "(" + unionQuery + ")"
+	// pkgLogger.Info(finalQuery)
+
+	jd := getQueueForCustomer(distributed.GetCustomerList()[0].WorkspaceID, queueType)
+	rows, err := jd.dbHandle.Query(finalQuery)
+	jd.assertError(err)
+	defer rows.Close()
+
+	var jobList []*JobT
+	for rows.Next() {
+		var job JobT
+		err := rows.Scan(&job.JobID, &job.UUID, &job.UserID, &job.Parameters, &job.CustomVal,
+			&job.EventPayload, &job.CreatedAt, &job.ExpireAt)
+		jd.assertError(err)
+		jobList = append(jobList, &job)
+	}
+	// pkgLogger.Info(jobList)
+
+	return jobList
+}
+
+func GetUnionProcessed(params GetQueryParamsT, queueType string) []*JobT {
+	toQuery := params.Count
+	customValFilters := params.CustomValFilters
+	stateFilters := params.StateFilters
+	// parameterFilters := params.ParameterFilters
+	//create query here
+
+	configList := distributed.GetAllCustomersComputeConfig()
+	unionQueries := make([]string, 0)
+	for customer, config := range configList {
+		count := int(config.ComputeShare * float32(toQuery))
+		jd := getQueueForCustomer(customer, queueType)
+		jd.dsMigrationLock.RLock()
+		jd.dsListLock.RLock()
+		defer jd.dsMigrationLock.RUnlock()
+		defer jd.dsListLock.RUnlock()
+
+		ds := jd.getDSList(false)[0]
+		stateQuery := " AND " + constructQuery(jd, "job_state", stateFilters, "OR")
+		customValQuery := " AND " +
+			constructQuery(jd, fmt.Sprintf("%s.custom_val", ds.JobTable),
+				customValFilters, "OR")
+		sourceQuery := ""
+		limitQuery := fmt.Sprintf(" LIMIT %d ", count)
+		sqlStatement := fmt.Sprintf(`SELECT
+				%[1]s.job_id, %[1]s.uuid, %[1]s.user_id, %[1]s.parameters, %[1]s.custom_val, %[1]s.event_payload,
+				%[1]s.created_at, %[1]s.expire_at,
+				job_latest_state.job_state, job_latest_state.attempt,
+				job_latest_state.exec_time, job_latest_state.retry_time,
+				job_latest_state.error_code, job_latest_state.error_response, job_latest_state.parameters
+			 FROM
+				%[1]s,
+				(SELECT job_id, job_state, attempt, exec_time, retry_time,
+				  error_code, error_response, parameters FROM %[2]s WHERE id IN
+					(SELECT MAX(id) from %[2]s GROUP BY job_id) %[3]s)
+				AS job_latest_state
+			 WHERE %[1]s.job_id=job_latest_state.job_id
+			  %[4]s %[5]s
+			  AND job_latest_state.retry_time < $1 ORDER BY %[1]s.job_id %[6]s`,
+			ds.JobTable, ds.JobStatusTable, stateQuery, customValQuery, sourceQuery, limitQuery)
+		unionQueries = append(unionQueries, sqlStatement)
+	}
+	unionQuery := strings.Join(unionQueries, ") UNION (")
+	finalQuery := "(" + unionQuery + ")"
+	// pkgLogger.Info(finalQuery)
+
+	jd := getQueueForCustomer(distributed.GetCustomerList()[0].WorkspaceID, queueType)
+	stmt, err := jd.dbHandle.Prepare(finalQuery)
+	jd.assertError(err)
+	defer stmt.Close()
+	rows, err := stmt.Query(getTimeNowFunc())
+	jd.assertError(err)
+	defer rows.Close()
+
+	var jobList []*JobT
+	for rows.Next() {
+		var job JobT
+		err := rows.Scan(&job.JobID, &job.UUID, &job.UserID, &job.Parameters, &job.CustomVal,
+			&job.EventPayload, &job.CreatedAt, &job.ExpireAt,
+			&job.LastJobStatus.JobState, &job.LastJobStatus.AttemptNum,
+			&job.LastJobStatus.ExecTime, &job.LastJobStatus.RetryTime,
+			&job.LastJobStatus.ErrorCode, &job.LastJobStatus.ErrorResponse, &job.LastJobStatus.Parameters)
+		jd.assertError(err)
+		jobList = append(jobList, &job)
+	}
+
+	return jobList
 }
