@@ -54,9 +54,9 @@ TransformationDebugger:
 Archiver:
   backupRowsBatchSize: 100
 JobsDB:
-  jobDoneMigrateThres: 0.8
+  jobDoneMigrateThres: 0.5
   jobStatusMigrateThres: 5
-  maxDSSize: 100000
+  maxDSSize: 40
   maxMigrateOnce: 10
   maxMigrateDSProbe: 10
   maxTableSizeInMB: 300

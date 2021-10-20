@@ -1767,6 +1767,7 @@ func (proc *HandleT) mainLoop(ctx context.Context) {
 			<-proc.resumeChannel
 		case <-time.After(mainLoopTimeout):
 			proc.paused = false
+			SetIsUnlocked(false) //so this server doesn't read from gateway
 			if isUnLocked {
 				if proc.handlePendingGatewayJobs() {
 					currLoopSleep = time.Duration(0)
