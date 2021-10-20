@@ -214,8 +214,8 @@ func isJobTerminated(status int) bool {
 }
 
 func loadConfig() {
-	config.RegisterIntConfigVariable(10000, &jobQueryBatchSize, true, 1, "Router.jobQueryBatchSize")
-	config.RegisterIntConfigVariable(1000, &updateStatusBatchSize, true, 1, "Router.updateStatusBatchSize")
+	config.RegisterIntConfigVariable(10, &jobQueryBatchSize, true, 1, "Router.jobQueryBatchSize")
+	config.RegisterIntConfigVariable(10, &updateStatusBatchSize, true, 1, "Router.updateStatusBatchSize")
 	config.RegisterDurationConfigVariable(time.Duration(1000), &readSleep, true, time.Millisecond, []string{"Router.readSleep", "Router.readSleepInMS"}...)
 	config.RegisterIntConfigVariable(1000, &noOfJobsPerChannel, false, 1, "Router.noOfJobsPerChannel")
 	config.RegisterIntConfigVariable(20, &noOfJobsToBatchInAWorker, false, 1, "Router.noOfJobsToBatchInAWorker")

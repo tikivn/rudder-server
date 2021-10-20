@@ -54,9 +54,9 @@ TransformationDebugger:
 Archiver:
   backupRowsBatchSize: 100
 JobsDB:
-  jobDoneMigrateThres: 0.8
+  jobDoneMigrateThres: 0.5
   jobStatusMigrateThres: 5
-  maxDSSize: 100000
+  maxDSSize: 40
   maxMigrateOnce: 10
   maxMigrateDSProbe: 10
   maxTableSizeInMB: 300
@@ -120,7 +120,7 @@ BatchRouter:
   retryTimeWindow: 180m
 Warehouse:
   mode: embedded
-  webPort: 8082
+  webPort: 8092
   uploadFreq: 1800s
   noOfWorkers: 8
   noOfSlaveWorkerRoutines: 4
@@ -155,7 +155,7 @@ Warehouse:
     disableNullable: false
     enableArraySupport: false
 Processor:
-  webPort: 8086
+  webPort: 8087
   loopSleep: 10ms
   maxLoopSleep: 5000ms
   fixedLoopSleep: 0ms

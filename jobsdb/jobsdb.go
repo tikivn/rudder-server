@@ -716,11 +716,11 @@ func (jd *HandleT) readerSetup(ctx context.Context) {
 		return nil
 	}))
 
-	jd.startBackupDSLoop(ctx)
-	jd.startMigrateDSLoop(ctx)
+	// jd.startBackupDSLoop(ctx)
+	// jd.startMigrateDSLoop(ctx)
 
 	g.Go(misc.WithBugsnag(func() error {
-		runArchiver(ctx, jd.tablePrefix, jd.dbHandle)
+		// runArchiver(ctx, jd.tablePrefix, jd.dbHandle)
 		return nil
 	}))
 }
@@ -881,9 +881,9 @@ Caller must have the dsListLock readlocked
 */
 func (jd *HandleT) getDSList(refreshFromDB bool) []dataSetT {
 
-	if !refreshFromDB {
-		return jd.datasetList
-	}
+	// if !refreshFromDB {
+	// 	return jd.datasetList
+	// }
 
 	//At this point we MUST have write-locked dsListLock
 	//since we are modiying the list
@@ -913,9 +913,9 @@ func (jd *HandleT) getDSRangeList(refreshFromDB bool) []dataSetRangeT {
 	var minID, maxID sql.NullInt64
 	var prevMax int64
 
-	if !refreshFromDB {
-		return jd.datasetRangeList
-	}
+	// if !refreshFromDB {
+	// 	return jd.datasetRangeList
+	// }
 
 	//At this point we must have write-locked dsListLock
 	dsList := jd.getDSList(true)
@@ -3090,6 +3090,7 @@ func (jd *HandleT) updateJobStatusInTxn(txHandler transactionHandler, statusList
 	dsRangeList := jd.getDSRangeList(false)
 	updatedStatesByDS = make(map[dataSetT][]string)
 	for _, ds := range dsRangeList {
+		jd.logger.Info(ds)
 		minID := ds.minJobID
 		maxID := ds.maxJobID
 		//We have processed upto (but excluding) lastPos on statusList.

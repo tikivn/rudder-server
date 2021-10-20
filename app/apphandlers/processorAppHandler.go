@@ -95,13 +95,13 @@ func (processor *ProcessorApp) StartRudderCore(ctx context.Context, options *app
 
 	if enableProcessor || enableReplay {
 		//setting up router, batch router, proc error DBs only if processor is enabled.
-		routerDB.Setup(jobsdb.ReadWrite, options.ClearDB, "rt", routerDBRetention, migrationMode, true, router.QueryFilters)
+		routerDB.Setup(jobsdb.Read, options.ClearDB, "rt", routerDBRetention, migrationMode, true, router.QueryFilters)
 		defer routerDB.TearDown()
 
-		batchRouterDB.Setup(jobsdb.ReadWrite, options.ClearDB, "batch_rt", routerDBRetention, migrationMode, true, batchrouter.QueryFilters)
+		batchRouterDB.Setup(jobsdb.Read, options.ClearDB, "batch_rt", routerDBRetention, migrationMode, true, batchrouter.QueryFilters)
 		defer batchRouterDB.TearDown()
 
-		procErrorDB.Setup(jobsdb.ReadWrite, options.ClearDB, "proc_error", routerDBRetention, migrationMode, false, jobsdb.QueryFiltersT{})
+		procErrorDB.Setup(jobsdb.Read, options.ClearDB, "proc_error", routerDBRetention, migrationMode, false, jobsdb.QueryFiltersT{})
 		defer procErrorDB.TearDown()
 	}
 
