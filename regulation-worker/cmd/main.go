@@ -13,7 +13,7 @@ import (
 	"github.com/rudderlabs/rudder-server/regulation-worker/internal/delete"
 	"github.com/rudderlabs/rudder-server/regulation-worker/internal/delete/api"
 	"github.com/rudderlabs/rudder-server/regulation-worker/internal/delete/batch"
-	"github.com/rudderlabs/rudder-server/regulation-worker/internal/delete/custom"
+	"github.com/rudderlabs/rudder-server/regulation-worker/internal/delete/kvstore"
 	"github.com/rudderlabs/rudder-server/regulation-worker/internal/destination"
 	"github.com/rudderlabs/rudder-server/regulation-worker/internal/service"
 )
@@ -46,7 +46,7 @@ func Run(ctx context.Context) {
 				DestTransformURL: config.GetEnv("DEST_TRANSFORM_URL", "http://localhost:9090"),
 			},
 			BM: &batch.BatchManager{},
-			CM: &custom.Mock_KVStoreWorker{},
+			CM: &kvstore.Mock_KVStoreWorker{},
 		},
 		DestDetail: &destination.DestMiddleware{
 			Dest:    &backendconfig.WorkspaceConfig{},

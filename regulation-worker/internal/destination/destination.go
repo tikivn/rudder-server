@@ -19,8 +19,8 @@ type DestMiddleware struct {
 }
 
 type destType interface {
-	LoadBatchList() []string
-	DestType(batchdest []string, destName string) string
+	LoadBatchList() ([]string, []string)
+	DestType(batchDest []string, customdest []string, destName string) string
 }
 
 type DestCategory struct {
@@ -45,19 +45,21 @@ func (d *DestMiddleware) GetDestDetails(destID, workspaceID string) (model.Desti
 			}
 		}
 	}
-	batchDestinations := d.DestCat.LoadBatchList()
-	destDetail.Type = d.DestCat.DestType(batchDestinations, destDetail.Name)
+	batchDestinations, customDestination := d.DestCat.LoadBatchList()
+	destDetail.Type = d.DestCat.DestType(batchDestinations, customDestination, destDetail.Name)
 	return destDetail, nil
 }
 
-func (dc *DestCategory) LoadBatchList() []string {
-	batchDest, _ := misc.LoadDestinations()
-	return batchDest
+func (dc *DestCategory) LoadBatchList() ([]string, []string) {
+	batchDest, customDest := misc.LoadDestinations()
+	return batchDest, customDest
 }
 
-func (dc *DestCategory) DestType(batchdest []string, destName string) string {
+func (dc *DestCategory) DestType(batchdest []string, customDest []string, destName string) string {
 	if misc.Contains(batchdest, destName) {
 		return "batch"
+	} else if misc.Contains(customDest, destName) {
+		return "kvstore"
 	} else {
 		return "API"
 	}

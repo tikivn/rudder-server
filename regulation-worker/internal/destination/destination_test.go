@@ -60,6 +60,7 @@ func TestGetDestDetails(t *testing.T) {
 		},
 	}
 	testBatchDestinations := []string{"S3", "GCS", "MINIO", "RS", "BQ", "AZURE_BLOB", "SNOWFLAKE", "POSTGRES", "CLICKHOUSE", "DIGITAL_OCEAN_SPACES", "MSSQL", "AZURE_SYNAPSE", "S3_DATALAKE", "MARKETO_BULK_UPLOAD"}
+	testCustomDestinations := []string{"REDIS", "KAFKA", "KINESIS", "AZURE_EVENT_HUB", "CONFLUENT_CLOUD", "FIREHOSE", "EVENTBRIDGE", "GOOGLEPUBSUB", "PERSONALIZE", "GOOGLESHEETS"}
 	testDestName := "S3"
 	testDestID := "1111"
 	testWorkspaceID := "1234"
@@ -77,8 +78,8 @@ func TestGetDestDetails(t *testing.T) {
 	mockDestMiddleware.EXPECT().Get().Return(testConfig, true).Times(1)
 
 	mockDestType := destination.NewMockdestType(mockCtrl)
-	mockDestType.EXPECT().LoadBatchList().Return(testBatchDestinations).Times(1)
-	mockDestType.EXPECT().DestType(testBatchDestinations, testDestName).Return("batch").Times(1)
+	mockDestType.EXPECT().LoadBatchList().Return(testBatchDestinations, testCustomDestinations).Times(1)
+	mockDestType.EXPECT().DestType(testBatchDestinations, testCustomDestinations, testDestName).Return("batch").Times(1)
 
 	dest := destination.DestMiddleware{
 		Dest:    mockDestMiddleware,
