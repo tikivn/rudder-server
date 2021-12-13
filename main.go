@@ -23,6 +23,7 @@ import (
 	_ "go.uber.org/automaxprocs"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/rudderlabs/rudder-server/etcdconfig"
 	"github.com/rudderlabs/rudder-server/gateway"
 	"github.com/rudderlabs/rudder-server/gateway/webhook"
 	"github.com/rudderlabs/rudder-server/jobsdb"
@@ -159,6 +160,7 @@ func runAllInit() {
 	stats.Init()
 	db.Init()
 	diagnostics.Init()
+	etcdconfig.Init()
 	backendconfig.Init()
 	warehouseutils.Init()
 	bigquery.Init()
