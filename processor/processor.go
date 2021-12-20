@@ -115,6 +115,8 @@ type HandleT struct {
 
 	backgroundWait   func() error
 	backgroundCancel context.CancelFunc
+
+	podStatusChan chan struct{}
 }
 
 var defaultTransformerFeatures = `{
@@ -380,6 +382,7 @@ func (proc *HandleT) Setup(backendConfig backendconfig.BackendConfig, gatewayDB 
 		proc.backendConfigSubscriber()
 	})
 
+	proc.podStatusChan = make(chan struct{})
 	rruntime.Go(func() {
 		proc.watchETCDForPodStatus(context.Background())
 	})
@@ -401,6 +404,7 @@ func (proc *HandleT) Setup(backendConfig backendconfig.BackendConfig, gatewayDB 
 
 // Start starts this processor's main loops.
 func (proc *HandleT) Start(ctx context.Context) {
+	<-proc.podStatusChan
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(misc.WithBugsnag(func() error {
@@ -431,7 +435,10 @@ func (proc *HandleT) Shutdown() {
 }
 
 func (proc *HandleT) watchETCDForPodStatus(ctx context.Context) {
-	watchChan := etcdconfig.WatchForMigration(ctx)
+	watchChan, initialState := etcdconfig.WatchForMigration(ctx)
+	if initialState == "steady" {
+		proc.podStatusChan <- struct{}{}
+	}
 	for watchResp := range watchChan {
 		switch watchResp["type"] {
 		case "PUT":
@@ -439,6 +446,10 @@ func (proc *HandleT) watchETCDForPodStatus(ctx context.Context) {
 			case "pause":
 				proc.Pause()
 			case "resume":
+				if initialState != "steady" {
+					proc.podStatusChan <- struct{}{}
+					initialState = "steady"
+				}
 				proc.Resume()
 			}
 		case "DELETE":

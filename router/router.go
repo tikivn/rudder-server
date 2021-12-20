@@ -141,6 +141,9 @@ type HandleT struct {
 	resultSetLock    sync.RWMutex
 	lastResultSet    *resultSetT
 	lastQueryRunTime time.Time
+	earliestJobMap   map[string]time.Time
+
+	podStatusChan chan struct{}
 }
 
 type jobResponseT struct {
@@ -2116,6 +2119,7 @@ func (rt *HandleT) Setup(backendConfig backendconfig.BackendConfig, jobsDB jobsd
 	rt.isBackendConfigInitialized = false
 	rt.backendConfigInitialized = make(chan bool)
 
+	rt.podStatusChan = make(chan struct{})
 	rruntime.Go(func() {
 		rt.watchETCDForPodStatus(context.Background())
 	})
@@ -2149,7 +2153,10 @@ func (rt *HandleT) Setup(backendConfig backendconfig.BackendConfig, jobsDB jobsd
 }
 
 func (rt *HandleT) watchETCDForPodStatus(ctx context.Context) {
-	watchChan := etcdconfig.WatchForMigration(ctx)
+	watchChan, initialState := etcdconfig.WatchForMigration(ctx)
+	if initialState == "steady" {
+		rt.podStatusChan <- struct{}{}
+	}
 	for watchResp := range watchChan {
 		switch watchResp["type"] {
 		case "PUT":
@@ -2157,6 +2164,10 @@ func (rt *HandleT) watchETCDForPodStatus(ctx context.Context) {
 			case "pause":
 				rt.Pause()
 			case "resume":
+				if initialState != "steady" {
+					rt.podStatusChan <- struct{}{}
+					initialState = "steady"
+				}
 				rt.Resume()
 			}
 		case "DELETE":
@@ -2166,6 +2177,7 @@ func (rt *HandleT) watchETCDForPodStatus(ctx context.Context) {
 }
 
 func (rt *HandleT) Start() {
+	<-rt.podStatusChan
 	ctx := rt.backgroundCtx
 	rt.backgroundGroup.Go(func() error {
 		<-rt.backendConfigInitialized
