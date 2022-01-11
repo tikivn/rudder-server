@@ -8,8 +8,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	uuid "github.com/gofrs/uuid"
-	"github.com/onsi/ginkgo"
-	. "github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/ginkgo/v2"
 	"github.com/tidwall/gjson"
 
 	. "github.com/onsi/gomega"

@@ -49,7 +49,8 @@ require (
 	github.com/minio/minio-go/v6 v6.0.49
 	github.com/mkmik/multierror v0.3.0
 	github.com/onsi/ginkgo v1.16.4
-	github.com/onsi/gomega v1.10.1
+	github.com/onsi/ginkgo/v2 v2.0.0
+	github.com/onsi/gomega v1.17.0
 	github.com/opencontainers/runc v1.0.1 // indirect
 	github.com/ory/dockertest v3.3.5+incompatible
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
@@ -88,6 +89,5 @@ require (
 	gopkg.in/alexcesaro/statsd.v2 v2.0.0
 	gopkg.in/ini.v1 v1.52.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gotest.tools v2.2.0+incompatible // indirect
 )

@@ -3,16 +3,17 @@ package misc
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
 	"github.com/gofrs/uuid"
 	"github.com/iancoleman/strcase"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/rudderlabs/rudder-server/config"
 	"github.com/rudderlabs/rudder-server/utils/logger"
 	"github.com/rudderlabs/rudder-server/utils/timeutil"
-	"os"
-	"path/filepath"
-	"time"
 )
 
 func initMisc() {
