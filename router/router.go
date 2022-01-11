@@ -33,6 +33,7 @@ import (
 	"github.com/tidwall/sjson"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/marusama/cyclicbarrier"
 	"github.com/rudderlabs/rudder-server/config"
 	"github.com/rudderlabs/rudder-server/jobsdb"
 	oauth "github.com/rudderlabs/rudder-server/router/oauthResponseHandler"
@@ -136,8 +137,7 @@ type HandleT struct {
 	customerCount  map[string]int
 	earliestJobMap map[string]time.Time
 
-	resultSetMeta map[string]*resultSetT
-	resultSetLock sync.RWMutex
+	resultSetMeta map[int64]*resultSetT
 	lastResultSet *resultSetT
 }
 
@@ -242,30 +242,16 @@ type resultSetT struct {
 	resultSetLock      sync.RWMutex
 	resultSetID        int64
 	resultSetBeginTime time.Time
+	workersAssigned    map[int]bool
+	workerSyncBarrier  cyclicbarrier.CyclicBarrier
+	processingBegan    bool
 }
 
-func (rt *HandleT) incrLastResultSetID() {
-	rt.lastResultSet.resultSetLock.Lock()
-	defer rt.lastResultSet.resultSetLock.Unlock()
-	rt.lastResultSet.resultSetID++
-}
-
-func (rt *HandleT) getLastResultSetID() int64 {
-	rt.lastResultSet.resultSetLock.RLock()
-	defer rt.lastResultSet.resultSetLock.RUnlock()
-	return rt.lastResultSet.resultSetID
-}
-
-func (rt *HandleT) setCurrentResultSet(id int64) *resultSetT {
-	rt.resultSetLock.Lock()
-	defer rt.resultSetLock.Unlock()
-	val, ok := rt.resultSetMeta[strconv.FormatInt(id, 10)]
-	if !ok {
-		val = &resultSetT{}
-		val.resultSetID = id
-		val.resultSetBeginTime = time.Now()
-		rt.resultSetMeta[strconv.FormatInt(id, 10)] = val
-	}
+func (rt *HandleT) newResultSet() {
+	rs := &resultSetT{}
+	rs.resultSetID = rt.lastResultSet.resultSetID + 1
+	rt.lastResultSet = rs
+	rt.resultSetMeta[rs.resultSetID] = rs
 
 	//Cleanup the resultSetMeta
 	minResultSetID := int64(math.MaxInt64)
@@ -276,21 +262,53 @@ func (rt *HandleT) setCurrentResultSet(id int64) *resultSetT {
 		}
 	}
 
-	keys := make([]string, 0, len(rt.resultSetMeta))
+	keys := make([]int64, 0, len(rt.resultSetMeta))
 	for key := range rt.resultSetMeta {
 		keys = append(keys, key)
 	}
 
-	for _, key := range keys {
-		rsID, err := strconv.ParseInt(key, 10, 64)
-		if err != nil {
-			panic("Error: resultSetKey not an integer")
-		}
+	for _, rsID := range keys {
 		if rsID < minResultSetID {
-			delete(rt.resultSetMeta, key)
+			delete(rt.resultSetMeta, rsID)
 		}
 	}
-	return val
+
+}
+
+func (rt *HandleT) getLastResultSetID() int64 {
+	return rt.lastResultSet.resultSetID
+}
+
+func (rt *HandleT) addWorkerToResultSet(workerID int) {
+	if rt.lastResultSet.workersAssigned == nil {
+		rt.lastResultSet.workersAssigned = make(map[int]bool)
+	}
+	rt.lastResultSet.workersAssigned[workerID] = true
+}
+
+func (rt *HandleT) initResultSetBarrier() {
+	rt.lastResultSet.workerSyncBarrier = cyclicbarrier.NewWithAction(len(rt.lastResultSet.workersAssigned), func() error {
+		rt.logger.Infof("Barrier Reached for resultSet %v", rt.lastResultSet.resultSetID)
+		return nil
+	})
+}
+
+func (rt *HandleT) startProcessingNewResultSet(id int64) *resultSetT {
+	rs, _ := rt.resultSetMeta[id]
+
+	//Check what TODO is?
+	err := rs.workerSyncBarrier.Await(context.TODO())
+	if err != nil {
+		rt.logger.Infof("Barrier Await Error for resultSet %v", rs.resultSetID)
+		panic(err)
+	}
+	rs.resultSetLock.Lock()
+	defer rs.resultSetLock.Unlock()
+	if !rs.processingBegan {
+		rs.resultSetBeginTime = time.Now()
+		rs.processingBegan = true
+	}
+	return rs
 }
 
 func isSuccessStatus(status int) bool {
@@ -714,7 +732,7 @@ func (worker *workerT) handleWorkerDestinationJobs(ctx context.Context) {
 
 				resultSetID := destinationJob.JobMetadataArray[0].ResultSetID
 				if worker.localResultSet.resultSetID < resultSetID {
-					resultSet := worker.rt.setCurrentResultSet(resultSetID)
+					resultSet := worker.rt.startProcessingNewResultSet(resultSetID)
 					worker.localResultSet.resultSetID = resultSet.resultSetID
 					worker.localResultSet.resultSetBeginTime = resultSet.resultSetBeginTime
 				}
@@ -1830,6 +1848,9 @@ func (rt *HandleT) readAndProcess() int {
 		customerCountStat.Count(count)
 		//note that this will give an aggregated count
 	}
+
+	//TODO is int64 good enough?
+	rt.newResultSet()
 	nonTerminalList := rt.jobsDB.GetProcessedUnion(rt.customerCount, jobsdb.GetQueryParamsT{CustomValFilters: []string{rt.destName}, StateFilters: []string{jobsdb.Waiting.State, jobsdb.Failed.State}}, rt.maxDSQuerySize)
 	unprocessedList := rt.jobsDB.GetUnprocessedUnion(rt.customerCount, jobsdb.GetQueryParamsT{CustomValFilters: []string{rt.destName}}, rt.maxDSQuerySize)
 
@@ -1923,8 +1944,11 @@ func (rt *HandleT) readAndProcess() int {
 			}
 			statusList = append(statusList, &status)
 			toProcess = append(toProcess, workerJobT{worker: w, job: job})
+			rt.addWorkerToResultSet(w.workerID)
 		}
 	}
+	rt.initResultSetBarrier()
+
 	rt.throttledUserMap = nil
 
 	//Mark the jobs as executing
@@ -1961,9 +1985,6 @@ func (rt *HandleT) readAndProcess() int {
 		time.Sleep(readSleep)
 		return 0
 	}
-
-	//TODO is int64 good enough?
-	rt.incrLastResultSetID()
 
 	//Send the jobs to the jobQ
 	for _, wrkJob := range toProcess {
@@ -2004,7 +2025,7 @@ func Init() {
 //Setup initializes this module
 func (rt *HandleT) Setup(backendConfig backendconfig.BackendConfig, jobsDB jobsdb.MultiTenantJobsDB, errorDB jobsdb.JobsDB, destinationDefinition backendconfig.DestinationDefinitionT, reporting utilTypes.ReportingI) {
 
-	rt.resultSetMeta = make(map[string]*resultSetT)
+	rt.resultSetMeta = make(map[int64]*resultSetT)
 	rt.lastResultSet = &resultSetT{}
 	rt.backendConfig = backendConfig
 	rt.generatorPauseChannel = make(chan *PauseT)
