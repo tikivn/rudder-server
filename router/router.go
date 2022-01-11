@@ -137,8 +137,9 @@ type HandleT struct {
 	customerCount  map[string]int
 	earliestJobMap map[string]time.Time
 
-	resultSetMeta map[int64]*resultSetT
-	lastResultSet *resultSetT
+	resultSetMeta      map[int64]*resultSetT
+	resultSetMetaMutex sync.RWMutex
+	lastResultSet      *resultSetT
 }
 
 type jobResponseT struct {
@@ -251,7 +252,10 @@ func (rt *HandleT) newResultSet() {
 	rs := &resultSetT{}
 	rs.resultSetID = rt.lastResultSet.resultSetID + 1
 	rt.lastResultSet = rs
+
+	rt.resultSetMetaMutex.Lock()
 	rt.resultSetMeta[rs.resultSetID] = rs
+	rt.resultSetMetaMutex.Unlock()
 
 	//Cleanup the resultSetMeta
 	minResultSetID := int64(math.MaxInt64)
@@ -262,14 +266,20 @@ func (rt *HandleT) newResultSet() {
 		}
 	}
 
+	rt.resultSetMetaMutex.RLock()
 	keys := make([]int64, 0, len(rt.resultSetMeta))
 	for key := range rt.resultSetMeta {
 		keys = append(keys, key)
 	}
+	rt.resultSetMetaMutex.RUnlock()
 
 	for _, rsID := range keys {
+
 		if rsID < minResultSetID {
+			rt.resultSetMetaMutex.Lock()
 			delete(rt.resultSetMeta, rsID)
+			rt.resultSetMetaMutex.Unlock()
+
 		}
 	}
 
@@ -294,7 +304,9 @@ func (rt *HandleT) initResultSetBarrier() {
 }
 
 func (rt *HandleT) startProcessingNewResultSet(id int64) *resultSetT {
+	rt.resultSetMetaMutex.RLock()
 	rs, _ := rt.resultSetMeta[id]
+	rt.resultSetMetaMutex.RUnlock()
 
 	//Check what TODO is?
 	err := rs.workerSyncBarrier.Await(context.TODO())
