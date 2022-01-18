@@ -143,7 +143,8 @@ type HandleT struct {
 	lastQueryRunTime time.Time
 	earliestJobMap   map[string]time.Time
 
-	podStatusChan chan struct{}
+	podStatusChan     chan struct{}
+	routerInitialized bool
 }
 
 type jobResponseT struct {
@@ -2132,7 +2133,7 @@ func (rt *HandleT) Setup(backendConfig backendconfig.BackendConfig, jobsDB jobsd
 	rt.backgroundCancel = cancel
 	rt.backgroundWait = g.Wait
 
-	rt.initWorkers()
+	// rt.initWorkers()
 	g.Go(misc.WithBugsnag(func() error {
 		rt.collectMetrics(ctx)
 		return nil
@@ -2179,6 +2180,7 @@ func (rt *HandleT) watchETCDForPodStatus(ctx context.Context) {
 
 func (rt *HandleT) Start() {
 	<-rt.podStatusChan
+	rt.initWorkers()
 	ctx := rt.backgroundCtx
 	rt.backgroundGroup.Go(func() error {
 		<-rt.backendConfigInitialized
@@ -2192,6 +2194,7 @@ func (rt *HandleT) Start() {
 		panic("Routers manager is nil. Shouldn't happen. Go Debug")
 	}
 	rm.AddRouter(rt)
+	rt.routerInitialized = true
 }
 
 func (rt *HandleT) Shutdown() {
@@ -2250,7 +2253,8 @@ func (rt *HandleT) Pause() {
 	rt.pauseLock.Lock()
 	defer rt.pauseLock.Unlock()
 
-	if rt.paused {
+	if rt.paused || !rt.routerInitialized {
+		rt.logger.Info("rt already_paused/not_initialized: ", rt.destName)
 		return
 	}
 
