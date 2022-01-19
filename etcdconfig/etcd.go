@@ -47,7 +47,7 @@ type EtcdService struct {
 
 func loadConfig() {
 	etcdHosts = strings.Split(config.GetEnv("ETCD_HOST", "127.0.0.1:2379"), `,`)
-	releaseName = config.GetEnv("RELEASE_NAME", `multitenantv22`)
+	releaseName = config.GetEnv("RELEASE_NAME", `/multitenantv22`)
 	instanceId = config.GetEnv("INSTANCE_ID", `1`)
 	serverNumber = instanceId[strings.LastIndex(instanceId, `-`)+1:]
 	podPrefix = releaseName + `/SERVER/` + serverNumber
