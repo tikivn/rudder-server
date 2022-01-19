@@ -25,6 +25,7 @@ var (
 	pkgLogger        logger.LoggerI
 	releaseName      string
 	serverNumber     string
+	instanceId       string
 
 	podStatus                 string
 	podStatusWaitGroup        *sync.WaitGroup
@@ -46,9 +47,11 @@ type EtcdService struct {
 
 func loadConfig() {
 	etcdHosts = strings.Split(config.GetEnv("ETCD_HOST", "127.0.0.1:2379"), `,`)
-	releaseName = config.GetEnv("RELEASE_NAME", `multitenantv1`)
-	serverNumber = config.GetEnv("SERVER_NUMBER", `1`)
+	releaseName = config.GetEnv("RELEASE_NAME", `multitenantv22`)
+	instanceId = config.GetEnv("INSTANCE_ID", `1`)
+	serverNumber = instanceId[strings.LastIndex(instanceId, `-`)+1:]
 	podPrefix = releaseName + `/SERVER/` + serverNumber
+	pkgLogger.Info(podPrefix)
 	config.RegisterDurationConfigVariable(time.Duration(15), &etcdGetTimeout, true, time.Second, "ETCD_GET_TIMEOUT")
 	config.RegisterDurationConfigVariable(time.Duration(3), &connectTimeout, true, time.Second, "ETCD_CONN_TIMEOUT")
 	config.RegisterDurationConfigVariable(time.Duration(3), &etcdWatchTimeout, true, time.Second, "ETCD_WATCH_TIMEOUT")
