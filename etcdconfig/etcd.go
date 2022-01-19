@@ -218,6 +218,7 @@ func WatchForMigration(ctx context.Context, statusWatchChannel chan utils.DataEv
 	} else {
 		initialPodState = `normal` //default normal state, scheduler's responsibilty to assign the mode of a pod before it spawns
 	}
+	defer cli.Put(ctx, podPrefix+`/status`, initialPodState+`_completed`)
 	return initialPodState, podStatusWaitGroup
 }
 
