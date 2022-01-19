@@ -51,11 +51,11 @@ func loadConfig() {
 	instanceId = config.GetEnv("INSTANCE_ID", `1`)
 	serverNumber = instanceId[strings.LastIndex(instanceId, `-`)+1:]
 	podPrefix = releaseName + `/SERVER/` + serverNumber
-	pkgLogger.Info(podPrefix)
 	config.RegisterDurationConfigVariable(time.Duration(15), &etcdGetTimeout, true, time.Second, "ETCD_GET_TIMEOUT")
 	config.RegisterDurationConfigVariable(time.Duration(3), &connectTimeout, true, time.Second, "ETCD_CONN_TIMEOUT")
 	config.RegisterDurationConfigVariable(time.Duration(3), &etcdWatchTimeout, true, time.Second, "ETCD_WATCH_TIMEOUT")
 	pkgLogger = logger.NewLogger().Child("etcd")
+	pkgLogger.Info(podPrefix)
 	podStatusLock = sync.RWMutex{}
 	podStatusWaitGroup = &sync.WaitGroup{}
 	connectToETCD()
