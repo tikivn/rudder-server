@@ -32,7 +32,7 @@ import (
 var (
 	pkgLogger             = logger.NewLogger().Child("batch")
 	regexRequiredSuffix   = regexp.MustCompile(".json.gz$")
-	StatusTrackerFileName = "rudderDeleteTracker.txt"
+	statusTrackerFileName = "ruddderDeleteTracker.txt"
 	supportedDestinations = []string{"S3"}
 )
 
@@ -318,6 +318,7 @@ func (b *Batch) upload(ctx context.Context, uploadFileAbsPath, actualFileName, a
 		return fmt.Errorf("error while opening file, %w", err)
 	}
 	defer uploadFilePtr.Close()
+
 	_, err = b.FM.Upload(uploadFilePtr, fileNamePrefixes[1:len(fileNamePrefixes)-1]...)
 	if err != nil {
 		return fmt.Errorf("error while uploading cleaned file: %w", err)
@@ -388,7 +389,9 @@ func (b *Batch) createPatternFile(userAttributes []model.UserAttribute) (string,
 }
 
 type BatchManager struct {
-	FMFactory filemanager.FileManagerFactory
+}
+
+type KVDeleteManager struct {
 }
 
 func (bm *BatchManager) GetSupportedDestinations() []string {
@@ -396,11 +399,13 @@ func (bm *BatchManager) GetSupportedDestinations() []string {
 	return supportedDestinations
 }
 
+//TODO: aws s3 ListObject allows listing of at max 1000 object at a time. So, implement paginatin.
 //Delete users corresponding to input userAttributes from a given batch destination
 func (bm *BatchManager) Delete(ctx context.Context, job model.Job, destConfig map[string]interface{}, destName string) model.JobStatus {
 	pkgLogger.Debugf("deleting job: %v", job, "from batch destination: %v", destName)
 
-	fm, err := bm.FMFactory.New(&filemanager.SettingsT{
+	fmFactory := filemanager.FileManagerFactoryT{}
+	fm, err := fmFactory.New(&filemanager.SettingsT{
 		Provider: destName,
 		Config:   destConfig,
 	})
@@ -451,7 +456,7 @@ func (bm *BatchManager) Delete(ctx context.Context, job model.Job, destConfig ma
 		//since those files are already cleaned.
 		var cleanedFiles []string
 		absStatusTrackerFileName, err := func() (string, error) {
-			absStatusTrackerFileName, err := batch.download(ctx, filepath.Join(destConfig["prefix"].(string), StatusTrackerFileName))
+			absStatusTrackerFileName, err := batch.download(ctx, filepath.Join(destConfig["prefix"].(string), statusTrackerFileName))
 			if err != nil {
 				pkgLogger.Errorf("error while downloading statusTrackerFile: %v", err)
 				return "", fmt.Errorf("error while downloading statusTrackerFile: %w", err)
@@ -491,7 +496,7 @@ func (bm *BatchManager) Delete(ctx context.Context, job model.Job, destConfig ma
 						pkgLogger.Errorf("error while creating temporary directory: %v", err)
 						return "", fmt.Errorf("error while creating temporary directory: %w", err)
 					}
-					statusTrackerFilePtr, err = os.OpenFile(filepath.Join(statusTrackerTmpDir, StatusTrackerFileName), os.O_CREATE|os.O_RDWR, 0644)
+					statusTrackerFilePtr, err = os.OpenFile(filepath.Join(statusTrackerTmpDir, statusTrackerFileName), os.O_CREATE|os.O_RDWR, 0644)
 					if err != nil {
 						pkgLogger.Errorf("error while opening file, %v", err)
 						return "", fmt.Errorf("error while opening file, %w", err)
@@ -588,7 +593,7 @@ func getFileSize(fileAbsPath string) int {
 
 func (b *Batch) cleanup(prefix string) {
 	pkgLogger.Debugf("removing all temporary files & directory locally & from destination.")
-	err := b.FM.DeleteObjects([]string{filepath.Join(prefix, StatusTrackerFileName)})
+	err := b.FM.DeleteObjects([]string{filepath.Join(prefix, statusTrackerFileName)})
 	if err != nil {
 		pkgLogger.Errorf("error while deleting delete status tracker file from destination: %v", err)
 	}
