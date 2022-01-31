@@ -55,7 +55,14 @@ func (cl *Client) sqlQuery(statement string) (result warehouseutils.QueryResult,
 		}
 		var stringRow []string
 		for i := 0; i < colCount; i++ {
-			stringRow = append(stringRow, fmt.Sprintf("%+v", values[i]))
+			var val string
+			switch v := values[i].(type) {
+			case []uint8:
+				val = string(v)
+			default:
+				val = values[i].(string)
+			}
+			stringRow = append(stringRow, fmt.Sprintf("%s", val))
 		}
 		result.Values = append(result.Values, stringRow)
 	}
