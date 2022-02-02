@@ -4,6 +4,7 @@ package debugger
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ var (
 
 type UploaderI interface {
 	Start()
+	Stop()
 	RecordEvent(data interface{}) bool
 }
 
@@ -37,6 +39,8 @@ type Uploader struct {
 	Client                                 sysUtils.HTTPClientI
 	maxBatchSize, maxRetry, maxESQueueSize int
 	batchTimeout, retrySleep               time.Duration
+
+	bgWaitGroup sync.WaitGroup
 }
 
 func init() {
@@ -57,18 +61,29 @@ func New(url string, transformer Transformer) UploaderI {
 	eventBuffer := make([]interface{}, 0)
 	client := &http.Client{}
 
-	uploader := &Uploader{url: url, transformer: transformer, eventBatchChannel: eventBatchChannel, eventBuffer: eventBuffer, Client: client}
+	uploader := &Uploader{url: url, transformer: transformer, eventBatchChannel: eventBatchChannel, eventBuffer: eventBuffer, Client: client, bgWaitGroup: sync.WaitGroup{}}
 	uploader.Setup()
 	return uploader
 }
 
 func (uploader *Uploader) Start() {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	rruntime.Go(func() {
 		uploader.handleEvents()
+		cancel()
 	})
+
+	uploader.bgWaitGroup.Add(1)
 	rruntime.Go(func() {
-		uploader.flushEvents()
+		uploader.flushEvents(ctx)
+		uploader.bgWaitGroup.Done()
 	})
+}
+
+func (upload *Uploader) Stop() {
+	close(upload.eventBatchChannel)
+	upload.bgWaitGroup.Wait()
 }
 
 //RecordEvent is used to put the event batch in the eventBatchChannel,
@@ -87,7 +102,7 @@ func (uploader *Uploader) uploadEvents(eventBuffer []interface{}) {
 
 	url := uploader.url
 
-	retryCount := 0
+	retryCount := 1
 	var resp *http.Response
 	//Sending event schema to Config Backend
 	for {
@@ -102,7 +117,7 @@ func (uploader *Uploader) uploadEvents(eventBuffer []interface{}) {
 		resp, err = uploader.Client.Do(req)
 		if err != nil {
 			pkgLogger.Error("Config Backend connection error", err)
-			if retryCount > uploader.maxRetry {
+			if retryCount >= uploader.maxRetry {
 				pkgLogger.Errorf("Max retries exceeded trying to connect to config backend")
 				return
 			}
@@ -136,9 +151,13 @@ func (uploader *Uploader) handleEvents() {
 	}
 }
 
-func (uploader *Uploader) flushEvents() {
+func (uploader *Uploader) flushEvents(ctx context.Context) {
 	for {
 		time.Sleep(uploader.batchTimeout)
+		select {
+		case <-ctx.Done():
+		case <-time.After(uploader.batchTimeout):
+		}
 		uploader.eventBufferLock.Lock()
 
 		flushSize := len(uploader.eventBuffer)
@@ -160,5 +179,9 @@ func (uploader *Uploader) flushEvents() {
 		}
 
 		flushEvents = nil
+
+		if ctx.Err() != nil {
+			return
+		}
 	}
 }

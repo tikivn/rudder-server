@@ -185,11 +185,11 @@ var _ = Describe("Uploader", func() {
 		It("should not send the live events request if client do fails. Retry 3 times.", func() {
 			mockTransformer := mocksDebugger.NewMockTransformer(c.mockCtrl)
 			uploader := New("http://test", mockTransformer)
-			uploader.Start()
+
 			mockHTTPClient := mocksSysUtils.NewMockHTTPClientI(c.mockCtrl)
 			uploader.(*Uploader).Client = mockHTTPClient
 			Http = sysUtils.NewHttp()
-			uploader.RecordEvent(recordingEvent)
+
 			mockTransformer.EXPECT().Transform(gomock.Any()).
 				DoAndReturn(func(data interface{}) ([]byte, error) {
 					eventBuffer := data.([]interface{})
@@ -207,6 +207,7 @@ var _ = Describe("Uploader", func() {
 			//New reader with that JSON
 			r := io.NopCloser(bytes.NewReader([]byte(jsonResponse)))
 
+			uploader.(*Uploader).batchTimeout = time.Millisecond
 			uploader.(*Uploader).retrySleep = time.Millisecond
 
 			wg := sync.WaitGroup{}
@@ -223,6 +224,10 @@ var _ = Describe("Uploader", func() {
 				Body:       r,
 			}, errors.New("client do failed")).Times(3)
 
+			uploader.Start()
+			defer uploader.Stop()
+
+			uploader.RecordEvent(recordingEvent)
 			wg.Wait()
 		})
 
