@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/golang/mock/gomock"
@@ -206,18 +207,23 @@ var _ = Describe("Uploader", func() {
 			//New reader with that JSON
 			r := io.NopCloser(bytes.NewReader([]byte(jsonResponse)))
 
-			uploader.(*Uploader).retrySleep = time.Second
+			uploader.(*Uploader).retrySleep = time.Millisecond
+
+			wg := sync.WaitGroup{}
+			wg.Add(3)
 
 			mockHTTPClient.EXPECT().Do(gomock.Any()).Do(func(req *http.Request) {
 				//asserting http request
 				req.Method = "POST"
 				req.URL.Host = "test"
+
+				wg.Done()
 			}).Return(&http.Response{
 				StatusCode: 200,
 				Body:       r,
-			}, errors.New("client do failed")).AnyTimes()
+			}, errors.New("client do failed")).Times(3)
 
-			time.Sleep(5 * time.Second)
+			wg.Wait()
 		})
 
 		It("should drop some events if number of events to record is more than queue size", func() {
