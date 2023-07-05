@@ -3,9 +3,9 @@ module github.com/rudderlabs/rudder-server
 go 1.16
 
 require (
-	cloud.google.com/go/bigquery v1.8.0
-	cloud.google.com/go/pubsub v1.3.1
-	cloud.google.com/go/storage v1.10.0
+	cloud.google.com/go/bigquery v1.44.0
+	cloud.google.com/go/pubsub v1.27.1
+	cloud.google.com/go/storage v1.27.0
 	github.com/Azure/azure-storage-blob-go v0.14.0
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
 	github.com/ClickHouse/clickhouse-go v1.5.1
@@ -30,7 +30,7 @@ require (
 	github.com/go-redis/redis v6.15.7+incompatible
 	github.com/gofrs/uuid v4.1.0+incompatible
 	github.com/golang-migrate/migrate/v4 v4.11.0
-	github.com/golang/mock v1.5.0
+	github.com/golang/mock v1.6.0
 	github.com/golang/protobuf v1.5.2
 	github.com/gomodule/redigo v1.8.5
 	github.com/google/uuid v1.3.0
@@ -38,7 +38,7 @@ require (
 	github.com/gotestyourself/gotestyourself v2.2.0+incompatible // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.0
 	github.com/hashicorp/yamux v0.0.0-20200609203250-aecfd211c9ce
-	github.com/iancoleman/strcase v0.1.3
+	github.com/iancoleman/strcase v0.2.0
 	github.com/jeremywohl/flatten v1.0.1
 	github.com/joho/godotenv v1.3.0
 	github.com/json-iterator/go v1.1.12
@@ -64,7 +64,7 @@ require (
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/spf13/viper v1.6.2
-	github.com/stretchr/testify v1.7.0
+	github.com/stretchr/testify v1.8.1
 	github.com/thoas/go-funk v0.5.0
 	github.com/tidwall/gjson v1.10.2
 	github.com/tidwall/sjson v1.0.4
@@ -73,14 +73,12 @@ require (
 	github.com/xtgo/uuid v0.0.0-20140804021211-a0b114877d4c // indirect
 	go.uber.org/automaxprocs v1.4.0
 	go.uber.org/zap v1.19.1
-	golang.org/x/net v0.0.0-20210917221730-978cfadd31cf
-	golang.org/x/oauth2 v0.0.0-20201208152858-08078c50e5b5
-	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210927094055-39ccf1dd6fa6 // indirect
-	golang.org/x/tools v0.1.6 // indirect
-	google.golang.org/api v0.39.0
-	google.golang.org/grpc v1.39.0
-	google.golang.org/protobuf v1.27.1
+	golang.org/x/net v0.5.0
+	golang.org/x/oauth2 v0.4.0
+	golang.org/x/sync v0.1.0
+	google.golang.org/api v0.103.0
+	google.golang.org/grpc v1.53.0
+	google.golang.org/protobuf v1.28.1
 	gopkg.in/alexcesaro/statsd.v2 v2.0.0
 	gopkg.in/ini.v1 v1.52.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
